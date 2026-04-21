@@ -1,0 +1,14 @@
+{
+  "package_version": 1,
+  "version": "0.0.1",
+  "name": "tapmind_ads_admob",
+  "id": "tapmind_ads_admob",
+  "description": "TapMind AdMob mediator: injects the TapMind adapter and Google Mobile Ads into Cocos Creator 3.8 Android/iOS builds.",
+  "author": "TapMind Tech",
+  "main": "./source/main.js",
+  "editor": ">=3.8.0",
+  "contributions": {
+    "builder": "./hooks/builder-hooks.js"
+  }
+}
+
