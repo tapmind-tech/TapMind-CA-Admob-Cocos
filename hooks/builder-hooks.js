@@ -11,7 +11,7 @@
  *   onAfterBuild       – inject into generated native project files
  */
 
-const fs   = require('fs');
+const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
@@ -34,7 +34,7 @@ const ANDROID_JSENGINE_DEPENDENCY =
     "    implementation 'androidx.javascriptengine:javascriptengine:1.0.0-beta01'";
 
 /** Android SDK version requirements */
-const ANDROID_MIN_SDK    = 26;  // androidx.javascriptengine requires API 26+
+const ANDROID_MIN_SDK = 26;  // androidx.javascriptengine requires API 26+
 const ANDROID_TARGET_SDK = 36;
 
 /** iOS deployment target */
@@ -94,6 +94,65 @@ function findFiles(dir, pattern) {
     return results;
 }
 
+/**
+ * Cocos Creator 3.8.8 bundles an older Enoki header that specializes several
+ * std::type_traits. New Apple libc++ rejects those during iOS archive builds.
+ */
+function patchCocosEnokiHalfHeader() {
+    const relativeHalfHeader = path.join(
+        'resources',
+        '3d',
+        'engine',
+        'native',
+        'external',
+        'sources',
+        'enoki',
+        'half.h'
+    );
+    const resourceRoots = [
+        process.resourcesPath,
+        '/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/Resources',
+    ].filter(Boolean);
+    const halfHeaderPaths = [...new Set(resourceRoots.map(root => path.join(root, relativeHalfHeader)))];
+
+    const invalidTraitsBlock = `NAMESPACE_BEGIN(std)
+template<> struct is_floating_point<enoki::half> : true_type { };
+template<> struct is_arithmetic<enoki::half> : true_type { };
+template<> struct is_signed<enoki::half> : true_type { };
+NAMESPACE_END(std)`;
+    const patchedTraitsBlock = `// [TapMind Native Ads] Apple libc++ disallows specializing these std::type_traits.
+// Enoki still provides std::numeric_limits<enoki::half> below, which is allowed.
+// NAMESPACE_BEGIN(std)
+// template<> struct is_floating_point<enoki::half> : true_type { };
+// template<> struct is_arithmetic<enoki::half> : true_type { };
+// template<> struct is_signed<enoki::half> : true_type { };
+// NAMESPACE_END(std)`;
+
+    let foundHeader = false;
+    for (const halfHeaderPath of halfHeaderPaths) {
+        let content = readFileSafe(halfHeaderPath);
+        if (content === null) continue;
+
+        foundHeader = true;
+        if (content.includes(patchedTraitsBlock)) {
+            console.log('[TapMind Native Ads] ✓ Cocos enoki/half.h already patched for Apple libc++');
+            return;
+        }
+        if (!content.includes(invalidTraitsBlock)) {
+            console.warn(`[TapMind Native Ads] WARNING: enoki/half.h found but expected type-traits block was not found: ${halfHeaderPath}`);
+            continue;
+        }
+
+        writeFile(halfHeaderPath, content.replace(invalidTraitsBlock, patchedTraitsBlock));
+        console.log(`[TapMind Native Ads] ✓ Patched Cocos enoki/half.h for Apple libc++: ${halfHeaderPath}`);
+        return;
+    }
+
+    if (!foundHeader) {
+        console.warn('[TapMind Native Ads] WARNING: Cocos enoki/half.h was not found. iOS archive may fail on newer Xcode versions.');
+    }
+}
+
 // ─── Android Injection ────────────────────────────────────────────────────────
 
 function patchGradleProperties(androidProjRoot) {
@@ -109,8 +168,8 @@ function patchGradleProperties(androidProjRoot) {
 
     if (current < ANDROID_MIN_SDK) {
         content = content.replace(
-            /PROP_MIN_SDK_VERSION=\d+/,
-            `PROP_MIN_SDK_VERSION=${ANDROID_MIN_SDK} # [TapMind] elevated from ${current}`
+            /PROP_MIN_SDK_VERSION=\d+.*/,
+            `PROP_MIN_SDK_VERSION=${ANDROID_MIN_SDK}`
         );
         writeFile(gradlePropsPath, content);
         console.log(`[TapMind Native Ads] ✓ PROP_MIN_SDK_VERSION updated: ${current} → ${ANDROID_MIN_SDK}`);
@@ -243,6 +302,8 @@ function injectAndroid(androidProjRoot) {
 function injectIOS(iosProjRoot, options) {
     console.log('[TapMind Native Ads] Injecting iOS configuration...');
 
+    patchCocosEnokiHalfHeader();
+
     // ── 1. Find project name from .xcodeproj (it's a directory, not a file) ──
     const xcodeprojs = findEntries(iosProjRoot, /\.xcodeproj$/);
     if (xcodeprojs.length === 0) {
@@ -332,6 +393,18 @@ end
         console.log('[TapMind Native Ads] ✓ Stripped -ld_classic (Xcode 26 linker fix)');
     }
 
+    // ── 5b.1. Remove Cocos' bundled static libwebp.a on Xcode 26 ─────────────
+    // Xcode 26 rejects this archive because one member is not 8-byte aligned.
+    // CocoaPods already provides libwebp.framework, so keep that one instead.
+    pbxFinal = readFileSafe(pbxprojPath);
+    if (pbxFinal && pbxFinal.includes('/external/ios/libs/libwebp.a')) {
+        const filtered = pbxFinal
+            .split('\n')
+            .filter(l => !l.includes('/external/ios/libs/libwebp.a'));
+        writeFile(pbxprojPath, filtered.join('\n'));
+        console.log('[TapMind Native Ads] ✓ Removed bundled libwebp.a (Xcode 26 linker fix)');
+    }
+
     // ── 5c. Clear EXCLUDED_ARCHS (Cocos excludes all simulator archs) ────────
     let pbxArchs = readFileSafe(pbxprojPath);
     if (pbxArchs && pbxArchs.includes('EXCLUDED_ARCHS')) {
@@ -361,7 +434,7 @@ end
         }
     }
 
-        // ── 6. Patch Info.plist with GADApplicationIdentifier ─────────────────
+    // ── 6. Patch Info.plist with GADApplicationIdentifier ─────────────────
     const plistFiles = findFiles(path.join(iosProjRoot, 'CMakeFiles'), /Info\.plist$/);
     for (const plistPath of plistFiles) {
         let plist = readFileSafe(plistPath);
@@ -385,8 +458,8 @@ function resolveProjRoots(options) {
     // __dirname = /project/extensions/tapmind_ads_admob/hooks
     const projectRoot = path.join(__dirname, '..', '..', '..');
     const outputFolder = options.outputName || options.taskName || options.platform || '';
-    const buildBase   = path.join(projectRoot, 'build', outputFolder);
-    const projDir     = path.join(buildBase, 'proj');
+    const buildBase = path.join(projectRoot, 'build', outputFolder);
+    const projDir = path.join(buildBase, 'proj');
 
     // For Android, Cocos Creator 3.8 uses native/engine/android/ as the project root.
     // The build output at build/<name>/proj/ may not contain build.gradle files.
@@ -404,9 +477,11 @@ async function runInjection(options) {
             // Inject into native/engine/android/ (the actual project template)
             console.log(`[TapMind Native Ads] Android project root: ${roots.android}`);
             injectAndroid(roots.android);
-            // Also try injecting into the build output dir if it has gradle files
-            const buildGradle = path.join(roots.androidBuild, 'app', 'build.gradle');
-            if (fs.existsSync(buildGradle)) {
+            // Also patch the generated Gradle project. Cocos keeps gradle.properties
+            // here, while app/build.gradle still lives under native/engine/android.
+            const buildGradleProps = path.join(roots.androidBuild, 'gradle.properties');
+            const buildGradle = path.join(roots.androidBuild, 'build.gradle');
+            if (fs.existsSync(buildGradleProps) || fs.existsSync(buildGradle)) {
                 console.log(`[TapMind Native Ads] Also patching build output: ${roots.androidBuild}`);
                 injectAndroid(roots.androidBuild);
             }
