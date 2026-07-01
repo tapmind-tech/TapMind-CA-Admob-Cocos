@@ -10,7 +10,7 @@ The adapter (`customadapter-admob` on Android, `TapMindAdapter` on iOS) sits bet
 
 | Platform | What gets applied |
 |----------|-------------------|
-| **Android** | TapMind Maven repo for `io.github.tapmind-tech:customadapter-admob` |
+| **Android** | `io.github.tapmind-tech:customadapter-admob` from **Maven Central** |
 | **Android** | `com.google.android.gms:play-services-ads` (Google Mobile Ads) |
 | **Android** | `androidx.javascriptengine:javascriptengine` (required for AdMob 23.x fullscreen ads) |
 | **Android** | `minSdkVersion` / `compileSdkVersion` / `targetSdkVersion` raised when needed (min **26**, target **36**); `gradle.properties` `PROP_MIN_SDK_VERSION` aligned |
@@ -65,7 +65,7 @@ The hook runs after the native project is generated. Watch the build log for lin
 2. **Sync Gradle**.
 3. Build and run.
 
-The TapMind Maven repository is public — **no GitHub token** is required for `maven.pkg.github.com/tapmind-tech/customadapter-admob` in normal setups.
+The TapMind adapter is on **Maven Central** (`io.github.tapmind-tech`) — no custom Maven URL or GitHub token is required.
 
 ---
 
@@ -88,10 +88,8 @@ The extension may generate/overwrite the `Podfile`, run `pod install`, adjust `p
 ### Android — project `build.gradle` / `settings.gradle`
 
 ```gradle
-// [TapMind Native Ads] Custom AdMob adapter repository
-maven {
-    url "https://maven.pkg.github.com/tapmind-tech/customadapter-admob"
-}
+// [TapMind Native Ads] Maven Central (TapMind adapter)
+mavenCentral()
 ```
 
 ### Android — `app/build.gradle` (typical)
@@ -101,9 +99,9 @@ minSdkVersion 26
 targetSdkVersion 36
 // ...
 // [TapMind] Google Mobile Ads SDK
-    implementation 'com.google.android.gms:play-services-ads:23.2.0'
+    implementation 'com.google.android.gms:play-services-ads:25.4.0'
 // [TapMind] TapMind AdMob adapter
-    implementation 'io.github.tapmind-tech:customadapter-admob:2.1.3'
+    implementation 'io.github.tapmind-tech:customadapter-admob:2.1.14'
 // [TapMind] Jetpack JavaScriptEngine
     implementation 'androidx.javascriptengine:javascriptengine:1.0.0-beta01'
 ```
@@ -129,7 +127,7 @@ Android injections skip duplicate repository and dependency lines when already p
 |-------|-------------|
 | No `build.gradle` / Gradle errors | Run a full Android build so `native/engine/android` (or build output) exists. |
 | No `Podfile` / iOS errors | Run a full iOS build first; ensure CocoaPods is installed if auto `pod install` fails. |
-| Gradle 401 on Maven | Repo is public — check proxy/VPN; credentials should not be required. |
+| Gradle 401 on Maven | Adapter is on Maven Central — check proxy/VPN; credentials should not be required. |
 | Extension not in Extension Manager | Folder must live under project `extensions/`, not under `assets/`. |
 
 ---

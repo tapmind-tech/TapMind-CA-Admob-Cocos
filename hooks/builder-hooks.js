@@ -21,17 +21,13 @@ const { execSync } = require('child_process');
 /** AdMob App ID — must match the ID in AdManager.ts */
 const ADMOB_APP_ID = 'ca-app-pub-2967653914154128~9624426349';
 
-/** Android Maven repository that hosts the TapMind AdMob adapter */
-const ANDROID_MAVEN_REPO_URL =
-    'https://maven.pkg.github.com/tapmind-tech/customadapter-admob';
-
 /** Gradle dependency string for Google Mobile Ads SDK */
 const ANDROID_ADMOB_DEPENDENCY =
-    "    implementation 'com.google.android.gms:play-services-ads:23.2.0'";
+    "    implementation 'com.google.android.gms:play-services-ads:25.4.0'";
 
 /** Gradle dependency string for the TapMind AdMob adapter */
 const ANDROID_DEPENDENCY =
-    "    implementation 'io.github.tapmind-tech:customadapter-admob:2.1.5'";
+    "    implementation 'io.github.tapmind-tech:customadapter-admob:2.1.14'";
 
 /** Gradle dependency for Jetpack JavaScriptEngine — required by AdMob 23.x for full-screen ads */
 const ANDROID_JSENGINE_DEPENDENCY =
@@ -121,54 +117,59 @@ function patchGradleProperties(androidProjRoot) {
     }
 }
 
+/**
+ * Ensure mavenCentral() is present in a Gradle repositories block.
+ * TapMind customadapter-admob is published on Maven Central (io.github.tapmind-tech).
+ */
+function ensureMavenCentralInGradle(gradleContent, repositoriesBlockRegex) {
+    if (!gradleContent || gradleContent.includes('mavenCentral()')) {
+        return gradleContent;
+    }
+    const snippet = `\n        // [TapMind Native Ads] Maven Central (TapMind adapter)\n        mavenCentral()`;
+    const match = repositoriesBlockRegex.exec(gradleContent);
+    if (!match) return gradleContent;
+
+    const repoStart = match.index + match[0].length;
+    let depth = 1, i = repoStart;
+    while (i < gradleContent.length && depth > 0) {
+        if (gradleContent[i] === '{') depth++;
+        else if (gradleContent[i] === '}') depth--;
+        i++;
+    }
+    const insertPos = i - 1;
+    return gradleContent.slice(0, insertPos) + snippet + '\n    ' + gradleContent.slice(insertPos);
+}
+
 function injectAndroid(androidProjRoot) {
     console.log('[TapMind Native Ads] Injecting Android configuration...');
 
     patchGradleProperties(androidProjRoot);
 
-    // ── Project-level build.gradle ─────────────────────────────────────
+    // ── Ensure Maven Central (TapMind adapter host) ─────────────────────
     const projectGradlePath = path.join(androidProjRoot, 'build.gradle');
     let projectGradle = readFileSafe(projectGradlePath);
 
-    if (projectGradle && !projectGradle.includes(ANDROID_MAVEN_REPO_URL)) {
-        const mavenSnippet = `\n        // [TapMind Native Ads] Custom AdMob adapter repository\n        maven {\n            url "${ANDROID_MAVEN_REPO_URL}"\n        }`;
-
-        const allprojectsMatch = /allprojects\s*\{[^}]*repositories\s*\{/s.exec(projectGradle);
-        if (allprojectsMatch) {
-            const repoStart = allprojectsMatch.index + allprojectsMatch[0].length;
-            let depth = 1, i = repoStart;
-            while (i < projectGradle.length && depth > 0) {
-                if (projectGradle[i] === '{') depth++;
-                else if (projectGradle[i] === '}') depth--;
-                i++;
-            }
-            const insertPos = i - 1;
-            projectGradle = projectGradle.slice(0, insertPos) + mavenSnippet + '\n    ' + projectGradle.slice(insertPos);
-        } else {
-            projectGradle += `\n\nallprojects {\n    repositories {${mavenSnippet}\n    }\n}\n`;
+    if (projectGradle) {
+        const updated = ensureMavenCentralInGradle(
+            projectGradle,
+            /allprojects\s*\{[^}]*repositories\s*\{/s
+        );
+        if (updated !== projectGradle) {
+            writeFile(projectGradlePath, updated);
+            console.log('[TapMind Native Ads] ✓ mavenCentral() added to project build.gradle');
         }
-        writeFile(projectGradlePath, projectGradle);
-        console.log('[TapMind Native Ads] ✓ Maven repository injected into project build.gradle');
     }
 
-    // settings.gradle
     const settingsGradlePath = path.join(androidProjRoot, 'settings.gradle');
     let settingsGradle = readFileSafe(settingsGradlePath);
-    if (settingsGradle && !settingsGradle.includes(ANDROID_MAVEN_REPO_URL)) {
-        const mavenBlock = `\n        // [TapMind Native Ads] Custom AdMob adapter repository\n        maven {\n            url "${ANDROID_MAVEN_REPO_URL}"\n        }`;
-        const drmMatch = /dependencyResolutionManagement\s*\{[^}]*repositories\s*\{/s.exec(settingsGradle);
-        if (drmMatch) {
-            const repoStart = drmMatch.index + drmMatch[0].length;
-            let depth = 1, i = repoStart;
-            while (i < settingsGradle.length && depth > 0) {
-                if (settingsGradle[i] === '{') depth++;
-                else if (settingsGradle[i] === '}') depth--;
-                i++;
-            }
-            const insertPos = i - 1;
-            settingsGradle = settingsGradle.slice(0, insertPos) + mavenBlock + '\n    ' + settingsGradle.slice(insertPos);
-            writeFile(settingsGradlePath, settingsGradle);
-            console.log('[TapMind Native Ads] ✓ Maven repository injected into settings.gradle');
+    if (settingsGradle) {
+        const updated = ensureMavenCentralInGradle(
+            settingsGradle,
+            /dependencyResolutionManagement\s*\{[^}]*repositories\s*\{/s
+        );
+        if (updated !== settingsGradle) {
+            writeFile(settingsGradlePath, updated);
+            console.log('[TapMind Native Ads] ✓ mavenCentral() added to settings.gradle');
         }
     }
 
